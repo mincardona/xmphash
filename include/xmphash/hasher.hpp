@@ -1,0 +1,6 @@
+#ifndef HASHER_HPP_INCLUDED_
+#define HASHER_HPP_INCLUDED_
+
+
+
+#endif  // HASHER_HPP_INCLUDED_
