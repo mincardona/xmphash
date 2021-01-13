@@ -32,8 +32,14 @@ target_include_directories(xmphash
     PUBLIC "${PROJECT_BINARY_DIR}" "${XmphashIncludeDir}")
 target_sources("${ExeTargetName}" PUBLIC ${HeaderFiles} PRIVATE ${SrcFiles})
 
-# add "PRIVATE OpenSSL::applink" in CMake 3.18.5 or higher for Windows builds
-target_link_libraries("${ExeTargetName}" PUBLIC OpenSSL::Crypto)
+if (WIN32 AND (NOT CMAKE_CXX_COMPILER_ID STREQUAL "MSVC"))
+    # assume g++ compatible
+    # add "PRIVATE OpenSSL::applink" in CMake 3.18.5 or higher for Windows builds
+    target_link_libraries("${ExeTargetName}" OpenSSL::Crypto -static-libgcc -static-libstdc++)
+else()
+    # add "PRIVATE OpenSSL::applink" in CMake 3.18.5 or higher for Windows builds
+    target_link_libraries("${ExeTargetName}" OpenSSL::Crypto)
+endif()
 
 target_compile_options("${ExeTargetName}" PRIVATE
     $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra -pedantic>)
