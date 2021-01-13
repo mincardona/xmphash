@@ -1,6 +1,8 @@
 #ifndef HASHER_HPP_INCLUDED_
 #define HASHER_HPP_INCLUDED_
 
+#include <cstddef>
+#include <cstdint>
 #include <algorithm>
 // only need libcrypto, not libssl!
 #include <openssl/evp.h>
@@ -26,42 +28,53 @@ bool initHashSubsystem() {
     return true;
 }
 
-struct HashDigest {
-    std::size_t length;
-    std::uint8_t data[hash_max_digest_size];
-};
-
 class Hasher {
 private:
-    bool is_finalized;
+    bool isFinalized_;
 
-    virtual bool consume_impl(const void* data, std::size_t count) = 0;
-    virtual bool finalize_impl(HashDigest* digest) = 0;
+    virtual bool consumeImpl(const void* data, std::size_t count) = 0;
+    virtual bool finalizeImpl(void* buf) = 0;
+    virtual bool resetImpl() = 0;
+    virtual std::size_t digestSizeImpl() const = 0;
+    virtual const char* getNameImpl() const = 0;
 
 public:
     Hasher()
-    : is_finalized(false)
+    : isFinalized_(false)
     {}
 
+    virtual ~Hasher() {}
+
     bool consume(const void* data, std::size_t count) {
-        if (!is_finalized && data != nullptr) {
-            this->consume_impl(data, count);
+        if (!isFinalized_ && data != nullptr) {
+            consumeImpl(data, count);
+            return true;
         } else {
             return false;
         }
     }
 
-    bool finalize(HashDigest* digest) {
-        if (!is_finalized && digest != nullptr) {
-            return this->finalize_impl(digest);
-        } else {
-            return false;
+    bool finalize(void* buf, std::size_t count) {
+        if (!isFinalized_ && buf != nullptr && count >= digestSize()) {
+            if (finalizeImpl(buf)) {
+                isFinalized_ = true;
+                return true;
+            }
         }
+        return false;
     }
 
-    virtual ~Hasher() {
-        HashDigest digest;
-        this->finalize(&digest);
+    std::size_t digestSize() const {
+        return digestSizeImpl();
+    }
+
+    // the returned pointer should not be used past the lifetime of this object
+    const char* getName() const {
+        return getNameImpl();
+    }
+
+    bool reset() {
+        return resetImpl();
     }
 };
 
@@ -97,42 +110,55 @@ private:
 
 inline constexpr Crc32Lut crc32Lut{};
 
-class Crc32Hasher : public Hasher {
-private:
-    static constexpr std::uint32_t base = 0xffffffffu;
-
-    std::uint32_t partial;
-
-    virtual bool consume_impl(const void* data, std::size_t count) {
-        uint32_t partial_next = partial;
-        for (std::size_t i = 0; i < count; i++) {
-            partial_next = crc32Lut[(partial_next ^ ((unsigned char*)data)[i]) & 0xff] ^ (partial_next >> 8);
-        }
-        partial = partial_next;
-        return true;
-    }
-
-    virtual bool finalize_impl(HashDigest* digest) {
-        std::uint32_t final = partial ^ base;
-
-        // write big-endian into buffer
-        digest->length = 4;
-        digest->data[0] = (final >> 24) & 0xf;
-        digest->data[1] = (final >> 16) & 0xf;
-        digest->data[2] = (final >> 8) & 0xf;
-        digest->data[3] = final & 0xf;
-
-        return true;
-    }
-
+class Crc32Hasher final : public Hasher {
 public:
     Crc32Hasher()
     : Hasher(),
-      partial(base)
+      partial_(base)
     {}
 
     virtual ~Crc32Hasher()
     {}
+
+private:
+    static constexpr std::uint32_t base = 0xffffffffu;
+
+    std::uint32_t partial_;
+
+    bool consumeImpl(const void* data, std::size_t count) override {
+        uint32_t partial_next = partial_;
+        for (std::size_t i = 0; i < count; i++) {
+            partial_next = crc32Lut[(partial_next ^ ((unsigned char*)data)[i]) & 0xff] ^ (partial_next >> 8);
+        }
+        partial_ = partial_next;
+        return true;
+    }
+
+    bool finalizeImpl(void* buf) override {
+        std::uint32_t final = partial_ ^ base;
+        auto ucbuf = static_cast<unsigned char*>(buf);
+
+        // write big-endian into buffer
+        ucbuf[0] = (final >> 24) & 0xf;
+        ucbuf[1] = (final >> 16) & 0xf;
+        ucbuf[2] = (final >> 8) & 0xf;
+        ucbuf[3] = final & 0xf;
+
+        return true;
+    }
+
+    bool resetImpl() override {
+        partial_ = base;
+        return true;
+    }
+
+    std::size_t digestSizeImpl() const override {
+        return 4;
+    }
+
+    const char* getNameImpl() const override {
+        return "crc32";
+    }
 };
 
 }
