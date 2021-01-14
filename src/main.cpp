@@ -2,6 +2,7 @@
 #include <thread>
 
 #include <xmphash/hasher.hpp>
+#include <xmphash/xplat.hpp>
 
 #define DIE(S) do { std::perror(S); exit(-1); } while (false);
 
@@ -12,6 +13,13 @@ unsigned int hardware_thread_count() {
 
 int main(int argc, char** argv) {
     std::printf("Detected %u hardware threads\n", hardware_thread_count());
+
+    if (mji::xplat::reopenStdinAsBinary()) {
+        std::printf("Reopened stdin in binary mode\n");
+    } else {
+        std::printf("Failed to reopen stdin in binary mode\n");
+    }
+
     if (argc < 2) {
         return 0;
     }

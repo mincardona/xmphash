@@ -24,6 +24,7 @@ configure_file(xmphash_version.hpp.in xmphash_version.in)
 set(XmphashIncludeDir "${CMAKE_CURRENT_SOURCE_DIR}/include/")
 set(HeaderFiles
     xmphash/hasher.hpp
+    xmphash/xplat.hpp
 )
 list(TRANSFORM HeaderFiles PREPEND "${XmphashIncludeDir}/")
 list(APPEND HeaderFiles "${PROJECT_BINARY_DIR}/xmphash_version.in")
@@ -32,6 +33,7 @@ set(XmphashSrcDir "${CMAKE_CURRENT_SOURCE_DIR}/src/")
 set(SrcFiles
     main.cpp
     hasher.cpp
+    xplat/io.cpp
 )
 list(TRANSFORM SrcFiles PREPEND "${XmphashSrcDir}/")
 

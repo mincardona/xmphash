@@ -1,5 +1,5 @@
-#ifndef HASHER_HPP_INCLUDED_
-#define HASHER_HPP_INCLUDED_
+#ifndef MJI_HASHER_HPP_INCLUDED_
+#define MJI_HASHER_HPP_INCLUDED_
 
 #include <algorithm>
 #include <cstddef>
@@ -286,4 +286,4 @@ public:
 
 }
 
-#endif  // HASHER_HPP_INCLUDED_
+#endif  // MJI_HASHER_HPP_INCLUDED_
