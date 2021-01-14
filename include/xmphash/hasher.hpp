@@ -1,9 +1,10 @@
 #ifndef HASHER_HPP_INCLUDED_
 #define HASHER_HPP_INCLUDED_
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <algorithm>
+#include <stdexcept>
 // only need libcrypto, not libssl!
 #include <openssl/evp.h>
 
@@ -22,7 +23,7 @@ constexpr auto hash_max_digest_size = std::max<std::size_t>(
     hash_max_custom_digest_size
 );
 
-bool initHashSubsystem() {
+inline bool initHashSubsystem() {
     // libcrypto does not require explicit initialization.
     // We do not require explicit initialization (yet).
     return true;
@@ -35,7 +36,7 @@ private:
     virtual bool consumeImpl(const void* data, std::size_t count) = 0;
     virtual bool finalizeImpl(void* buf) = 0;
     virtual bool resetImpl() = 0;
-    virtual std::size_t digestSizeImpl() const = 0;
+    virtual std::size_t getDigestSizeImpl() const = 0;
     virtual const char* getNameImpl() const = 0;
 
 public:
@@ -43,7 +44,7 @@ public:
     : isFinalized_(false)
     {}
 
-    virtual ~Hasher() {}
+    virtual ~Hasher()  = default;
 
     bool consume(const void* data, std::size_t count) {
         if (!isFinalized_ && data != nullptr) {
@@ -55,7 +56,7 @@ public:
     }
 
     bool finalize(void* buf, std::size_t count) {
-        if (!isFinalized_ && buf != nullptr && count >= digestSize()) {
+        if (!isFinalized_ && buf != nullptr && count >= getDigestSize()) {
             if (finalizeImpl(buf)) {
                 isFinalized_ = true;
                 return true;
@@ -64,8 +65,8 @@ public:
         return false;
     }
 
-    std::size_t digestSize() const {
-        return digestSizeImpl();
+    std::size_t getDigestSize() const {
+        return getDigestSizeImpl();
     }
 
     // the returned pointer should not be used past the lifetime of this object
@@ -127,8 +128,9 @@ private:
 
     bool consumeImpl(const void* data, std::size_t count) override {
         uint32_t partial_next = partial_;
+        auto ucdata = static_cast<const unsigned char*>(data);
         for (std::size_t i = 0; i < count; i++) {
-            partial_next = crc32Lut[(partial_next ^ ((unsigned char*)data)[i]) & 0xff] ^ (partial_next >> 8);
+            partial_next = crc32Lut[(partial_next ^ ucdata[i]) & 0xffu] ^ (partial_next >> 8);
         }
         partial_ = partial_next;
         return true;
@@ -139,10 +141,10 @@ private:
         auto ucbuf = static_cast<unsigned char*>(buf);
 
         // write big-endian into buffer
-        ucbuf[0] = (final >> 24) & 0xf;
-        ucbuf[1] = (final >> 16) & 0xf;
-        ucbuf[2] = (final >> 8) & 0xf;
-        ucbuf[3] = final & 0xf;
+        ucbuf[0] = (final >> 24) & 0xffu;
+        ucbuf[1] = (final >> 16) & 0xffu;
+        ucbuf[2] = (final >> 8) & 0xffu;
+        ucbuf[3] = final & 0xffu;
 
         return true;
     }
@@ -152,13 +154,134 @@ private:
         return true;
     }
 
-    std::size_t digestSizeImpl() const override {
+    std::size_t getDigestSizeImpl() const override {
         return 4;
     }
 
     const char* getNameImpl() const override {
         return "crc32";
     }
+};
+
+// RAII
+class EvpMdCtxWrapper final {
+public:
+    EvpMdCtxWrapper()
+    : context_(::EVP_MD_CTX_new())
+    {}
+
+    EvpMdCtxWrapper(const EvpMdCtxWrapper& other)
+    : context_(::EVP_MD_CTX_new())
+    {
+        if (!::EVP_MD_CTX_copy_ex(context_, other.get())) {
+            throw std::runtime_error("EVP_MD_CTX_copy_ex failed");
+        }
+    }
+
+    EvpMdCtxWrapper(EvpMdCtxWrapper&& other)
+    : context_(nullptr)
+    {
+        std::swap(this->context_, other.context_);
+    }
+
+    EvpMdCtxWrapper& operator=(const EvpMdCtxWrapper& other)
+    {
+        ::EVP_MD_CTX_free(this->context_);
+        this->context_ = nullptr;
+        if (!::EVP_MD_CTX_copy_ex(this->context_, other.get())) {
+            throw std::runtime_error("EVP_MD_CTX_copy_ex failed");
+        }
+        return *this;
+    }
+
+    EvpMdCtxWrapper& operator=(EvpMdCtxWrapper&& other)
+    {
+        std::swap(this->context_, other.context_);
+        return *this;
+    }
+
+    ~EvpMdCtxWrapper() {
+        if (context_ != nullptr) {
+            ::EVP_MD_CTX_free(context_);
+        }
+    }
+
+    ::EVP_MD_CTX* get() {
+        return context_;
+    }
+
+    const ::EVP_MD_CTX* get() const {
+        return context_;
+    }
+
+private:
+    ::EVP_MD_CTX* context_;
+};
+
+class EvpHasher final : public Hasher {
+private:
+    EvpMdCtxWrapper context_;
+    std::string name_;
+    // we don't own this, just treat it as an ID
+    const ::EVP_MD* digest_type_;
+
+    virtual bool consumeImpl(const void* data, std::size_t count) {
+        return ::EVP_DigestUpdate(context_.get(), data, count);
+    }
+
+    virtual bool finalizeImpl(void* buf) {
+        return ::EVP_DigestFinal_ex(context_.get(), static_cast<unsigned char*>(buf), nullptr);
+    }
+
+    virtual bool resetImpl() {
+        return ::EVP_DigestInit_ex(context_.get(), digest_type_, nullptr);
+    }
+
+    virtual std::size_t getDigestSizeImpl() const {
+        return ::EVP_MD_size(digest_type_);
+    }
+
+    virtual const char* getNameImpl() const {
+        return name_.c_str();
+    }
+
+    void initContext() {
+        digest_type_ = ::EVP_get_digestbyname(name_.c_str());
+        if (digest_type_ == nullptr) {
+            throw std::invalid_argument("unrecognized digest name: \"" + name_ + "\"");
+        }
+
+        if (!::EVP_DigestInit_ex(context_.get(), digest_type_, nullptr)) {
+            throw std::runtime_error("unable to initialize digest context (EVP_DigestInit_ex failed)");
+        }
+
+        // set EVP_MD_CTX_FLAG_FINALISE? ...probably not just to be safe
+        //void EVP_MD_CTX_set_flags(EVP_MD_CTX *ctx, int flags);
+    }
+
+public:
+    EvpHasher(const char* name)
+    : context_(),
+      name_(name),
+      digest_type_(nullptr)
+    {
+        initContext();
+    }
+
+    EvpHasher(std::string&& name)
+    : context_(),
+      name_(std::move(name)),
+      digest_type_(nullptr)
+    {
+        initContext();
+    }
+
+    EvpHasher(const EvpHasher& other) = default;
+    EvpHasher(EvpHasher&& other) = default;
+    EvpHasher& operator=(const EvpHasher& other) = default;
+    EvpHasher& operator=(EvpHasher&& other) = default;
+
+    virtual ~EvpHasher() = default;
 };
 
 }
