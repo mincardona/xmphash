@@ -2,6 +2,9 @@ cmake_minimum_required(VERSION 3.11)
 
 project(xmphash VERSION 0.1.0 LANGUAGES CXX DESCRIPTION "File hashing utility")
 
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED True)
+
 math(EXPR TargetBitness "${CMAKE_SIZEOF_VOID_P} * 8")
 if(TargetBitness EQUAL 32)
     set(TargetIs32Bit TRUE)
@@ -10,14 +13,9 @@ else()
 endif()
 
 # for CPack
-include(InstallRequiredSystemLibraries)
 include(FindThreads)
-
 # on Ubuntu, install libssl-dev
 find_package(OpenSSL REQUIRED)
-
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 configure_file(xmphash_version.hpp.in xmphash_version.in)
 
@@ -55,38 +53,22 @@ if(WIN32 AND (NOT CMAKE_CXX_COMPILER_ID STREQUAL "MSVC"))
         -static-libstdc++
     )
 else()
-    # add "PRIVATE OpenSSL::applink" in CMake 3.18.5 or higher for Windows builds
-    target_link_libraries("${ExeTargetName}" OpenSSL::Crypto Threads::Threads)
+    target_link_libraries("${ExeTargetName}"
+        OpenSSL::Crypto
+        Threads::Threads
+    )
 endif()
 
 target_compile_options("${ExeTargetName}" PRIVATE
     $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra -pedantic>)
 
 # install config
-if(WIN32)
-    # stop cmake from creating "bin" and "lib" dirs in the install archive/dir
-    set(CMAKE_INSTALL_BINDIR "")
-    set(CMAKE_INSTALL_LIBDIR "")
-    install(TARGETS xmphash RUNTIME)
-    # if we are using mingw-w64 on windows, copy over the runtime DLLs
-    # if(NOT MSVC)
-    #     if(TargetIs32Bit)
-    #         install(FILES
-    #             "/mingw32/bin/libwinpthread-1.dll" "/mingw32/bin/libcrypto-1_1.dll"
-    #             TYPE LIB
-    #         )
-    #     else()
-    #         install(FILES
-    #             "/mingw64/bin/libwinpthread-1.dll" "/mingw64/bin/libcrypto-1_1-x64.dll"
-    #             TYPE LIB
-    #         )
-    #     endif()
-    # endif()
-else()
-    install(TARGETS xmphash RUNTIME)
-endif()
+set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY FALSE)
+install(TARGETS xmphash RUNTIME)
 
 # CPack config
+set(CPACK_MONOLITHIC_INSTALL TRUE)
+set(CPACK_STRIP_FILES TRUE)
 set(CPACK_PACKAGE_VENDOR "Michael Incardona")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
 set(CPACK_PACKAGE_DESCRIPTION_FILE "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
@@ -104,7 +86,6 @@ if(WIN32)
     set(CPACK_NSIS_HELP_LINK "https:\\\\\\\\github.com/mincardona/xmphash")
 else()
     set(CPACK_GENERATOR "ZIP")  # should add debian package at some point
-    set(CPACK_STRIP_FILES "xmphash")
     set(CPACK_SOURCE_STRIP_FILES "")
 endif()
 set(CPACK_PACKAGE_EXECUTABLES "xmphash" "xmphash")
