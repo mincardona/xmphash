@@ -1,3 +1,5 @@
+#include <cassert>
+
 #include <xmphash/hasher.hpp>
 
 namespace mji::xmph {
@@ -57,7 +59,7 @@ bool Crc32Hasher::consumeImpl(const void* data, std::size_t count) {
     uint32_t partial_next = partial_;
     auto ucdata = static_cast<const unsigned char*>(data);
     for (std::size_t i = 0; i < count; i++) {
-        partial_next = crc32Lut[(partial_next ^ ucdata[i]) & 0xffu] ^ (partial_next >> 8);
+        partial_next = crc32Lut[(partial_next ^ ucdata[i]) & 0xFFu] ^ (partial_next >> 8);
     }
     partial_ = partial_next;
     return true;
@@ -165,7 +167,7 @@ void EvpHasher::initContext() {
         throw std::runtime_error("unable to initialize digest context (EVP_DigestInit_ex failed)");
     }
 
-    // set EVP_MD_CTX_FLAG_FINALISE? ...probably not just to be safe
+    // set EVP_MD_CTX_FLAG_FINALISE? ...probably not, just to be safe
     //void EVP_MD_CTX_set_flags(EVP_MD_CTX *ctx, int flags);
 }
 
@@ -185,4 +187,110 @@ EvpHasher::EvpHasher(std::string&& name)
     initContext();
 }
 
+namespace {
+
+/// Gets the value of a hex digit char ('0'-'F') as a number (0-15)
+/// Both lower and uppercase are accepted
+/// Returns -1 on an invalid digit
+int hexDigitValue(char c) {
+    if (c >= '0' && c <= '9') {
+        return c - '0';
+    } else if (c >= 'a' && c <= 'f') {
+        return c - 'a' + 0xA;
+    } else if (c >= 'A' && c <= 'F') {
+        return c - 'A' + 0xA;
+    } else {
+        return -1;
+    }
 }
+
+/// converts a number in [0, 15] to a digit or lowercase letter
+char valueToHexDigit(int n) {
+    assert(n > 0 && n < 16);
+
+    if (n < 10) {
+        return '0' + n;
+    } else {
+        return 'a' + (n - 10);
+    }
+}
+
+}
+
+std::optional<std::vector<unsigned char>> strToBytes(std::string_view sv) {
+    if (sv.length() % 2 != 0) {
+        return {};
+    }
+
+    std::vector<unsigned char> vec;
+    vec.reserve(sv.length() / 2);  // is this helpful?
+
+    for (std::size_t i = 0; i < sv.length(); i += 2) {
+        int h1 = hexDigitValue(sv[i]);
+        int h2 = hexDigitValue(sv[i + 1]);
+        if (h1 == -1 || h2 == -1) {
+            return {};
+        }
+        vec.push_back(static_cast<unsigned char>(h1 * 16 + h2));
+    }
+
+    return vec;
+}
+
+std::string bytesToStr(unsigned char* buf, std::size_t count) {
+    assert(count <= std::numeric_limits<std::size_t>::max() / 2);
+
+    std::string ret(count * 2, '\0');
+    for (std::size_t i = 0; i < count; i++) {
+        ret[i * 2] = valueToHexDigit((buf[i] >> 4) & 0xFu);
+        ret[i * 2 + 1] = valueToHexDigit(buf[i] & 0xFu);
+    }
+    return ret;
+}
+
+std::vector<std::string> splitOnChar(const char* str, char delim) {
+    if (*str == '\0') {
+        return {""};
+    }
+
+    std::vector<std::string> vec;
+    const char* start = str;
+    const char* finger = str;
+
+    for (;;) {
+        while (*finger != '\0' && *finger != ',') {
+            finger++;
+        }
+        // note that start == finger indicates an empty element
+        // i.e. either "token,\0" or ",token\0" or "token,,token\0"
+        vec.push_back({start, static_cast<std::string::size_type>(finger - start)});
+
+        if (*finger == delim) {
+            start = ++finger;
+            continue;
+        } else {
+            assert(*finger == '\0');
+            break;
+        }
+    }
+
+    assert(vec.size() >= 1);
+    return vec;
+}
+
+std::optional<std::pair<std::string, std::string>>
+parseNameDigestPair(const char* s) {
+    const char* splitPtr = s.find('=');
+    if (splitPtr == nullptr) {
+        return {};
+    }
+
+    // note that (splitIdx + 1 <= sv.size()) at this point
+    // so even "=" will split correctly
+    return std::make_pair(
+        std::string(s, splitPtr - s),
+        std::string(splitPtr + 1)
+    );
+}
+
+}  // namespace mji::xmph

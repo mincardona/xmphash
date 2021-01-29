@@ -4,8 +4,13 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <stdexcept>
-// only need libcrypto, not libssl!
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+// only need libcrypto, not libssl
 #include <openssl/evp.h>
 
 /*******************************************************************************
@@ -144,6 +149,19 @@ private:
     void initContext();
 };
 
-}
+/// Converts a string of hexadecimal digits into a byte vector. The string must
+/// have an even number of characters and each character must be a valid hex
+/// digit (this will produce a byte vector of length sv.length()/2). Returns an
+/// empty optional on failure.
+std::optional<std::vector<unsigned char>> strToBytes(std::string_view sv);
+std::string bytesToStr(unsigned char* buf, std::size_t count);
+
+/// The returned vector always has size >= 1
+std::vector<std::string> splitOnChar(const char* s, char delim);
+
+std::optional<std::pair<std::string, std::string>>
+parseNameDigestPair(const char* c);
+
+}  // namespace mji::xmph
 
 #endif  // MJI_HASHER_HPP_INCLUDED_
